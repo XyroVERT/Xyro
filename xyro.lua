@@ -1512,6 +1512,12 @@ if reason ~= nil then
     end)
     pcall(H.blacklistNotice, reason)
 
+    task.delay(0.15, function()
+        pcall(function()
+            player:Kick("Xyro blacklist: " .. tostring(reason or "blacklisted"))
+        end)
+    end)
+
     return
 end
 
@@ -1589,6 +1595,48 @@ if tostring(H.FIREBASE_URL or "") ~= "" then
 			ok = fbReq("PUT", H.fbUrl(node .. "/" .. fbRandKey() .. ".json"), '"' .. tostring(value) .. '"')
 		end
 		return ok
+	end
+\n	-- Direct staff blacklist writes. These are used by the admin-only
+	-- blacklistuser/unblacklistuser commands below.
+	H.fbStaffPut = function(username, reason)
+		username = tostring(username or ""):lower()
+		reason = tostring(reason or "")
+		if username == "" then
+			return false, "username required"
+		end
+		local url = H.fbUrl("staff/blacklist/" .. username .. ".json")
+		if url == "" then
+			return false, "Firebase not configured"
+		end
+		local ok, body = pcall(function()
+			return H.HS:JSONEncode(reason)
+		end)
+		if not ok then
+			return false, "could not encode reason"
+		end
+		local wrote = fbReq("PUT", url, body)
+		if not wrote then
+			task.wait(0.5)
+			wrote = fbReq("PUT", url, body)
+		end
+		return wrote, wrote and nil or "Firebase rejected the write"
+	end
+
+	H.fbStaffDelete = function(username)
+		username = tostring(username or ""):lower()
+		if username == "" then
+			return false, "username required"
+		end
+		local url = H.fbUrl("staff/blacklist/" .. username .. ".json")
+		if url == "" then
+			return false, "Firebase not configured"
+		end
+		local deleted = fbReq("DELETE", url)
+		if not deleted then
+			task.wait(0.5)
+			deleted = fbReq("DELETE", url)
+		end
+		return deleted, deleted and nil or "Firebase rejected the delete"
 	end
 
 	-- state-style write (presence): one FIXED key per player, value = unix
@@ -1696,6 +1744,11 @@ H.fbRefreshStaff = function()
 		if H.BLACKLISTED then
 			pcall(H.blacklistNotice, reason)
 			pcall(H.blacklistShutdown)
+			task.delay(0.15, function()
+				pcall(function()
+					player:Kick("Xyro blacklist: " .. tostring(reason or "blacklisted"))
+				end)
+			end)
 			return "Firebase staff list applied - this account is blacklisted, script disabled"
 		end
 		if H.gateEnforce and H.gateEnforce() then
@@ -11594,6 +11647,84 @@ add{
 	end,
 }
 add{
+	name = "blacklistuser",
+	group = "Debug",
+	debug = true,
+	args = "<username> <reason>",
+	help = "Blacklist a user in Firebase and have their Xyro client kick them",
+	run = function(c)
+		if not (H.staffIsAdmin and H.staffIsAdmin(player.UserId, player.Name)) then
+			return "staff only"
+		end
+		if not H.fbStaffPut then
+			return "Firebase write unavailable"
+		end
+
+		local target, reason = tostring(c.arg or ""):match("^@?([^%s]+)%s+(.+)$")
+		if not target or not reason then
+			return "usage: blacklistuser <username> <reason>"
+		end
+
+		target = target:gsub("^@", ""):lower()
+		reason = reason:gsub("^%s+", ""):gsub("%s+$", "")
+		if target == "" or reason == "" then
+			return "usage: blacklistuser <username> <reason>"
+		end
+
+		local ok, err = H.fbStaffPut(target, reason)
+		if not ok then
+			return "blacklist failed: " .. tostring(err or "unknown error")
+		end
+
+		H.BLACKLIST_NAMES[target] = reason
+
+		-- If the target is in this server, the normal staff transport can also
+		-- kick them immediately. The blacklist refresh remains the authoritative
+		-- enforcement and will kick them even if they are not currently here.
+		local online
+		for _, plr in ipairs(Players:GetPlayers()) do
+			if plr.Name:lower() == target then
+				online = plr
+				break
+			end
+		end
+
+		if online and online ~= player then
+			return "blacklisted @" .. online.Name .. " - " .. reason .. " (they will be kicked on their next staff refresh)"
+		end
+		return "blacklisted @" .. target .. " - " .. reason
+	end,
+}
+add{
+	name = "unblacklistuser",
+	group = "Debug",
+	debug = true,
+	args = "<username>",
+	help = "Remove a user from the Firebase blacklist",
+	run = function(c)
+		if not (H.staffIsAdmin and H.staffIsAdmin(player.UserId, player.Name)) then
+			return "staff only"
+		end
+		if not H.fbStaffDelete then
+			return "Firebase write unavailable"
+		end
+
+		local target = tostring(c.arg or ""):match("^@?([^%s]+)$")
+		if not target then
+			return "usage: unblacklistuser <username>"
+		end
+
+		target = target:gsub("^@", ""):lower()
+		local ok, err = H.fbStaffDelete(target)
+		if not ok then
+			return "unblacklist failed: " .. tostring(err or "unknown error")
+		end
+
+		H.BLACKLIST_NAMES[target] = nil
+		return "unblacklisted @" .. target
+	end,
+}
+add{
 	name = "blocked",
 	alias = { "blacklist" },
 	group = "Debug",
@@ -16327,6 +16458,11 @@ if H.BLACKLISTED then
     end)
     pcall(H.blacklistShutdown)
     pcall(H.blacklistNotice, H.BLACKLIST_REASON or "")
+    task.delay(0.15, function()
+        pcall(function()
+            player:Kick("Xyro blacklist: " .. tostring(H.BLACKLIST_REASON or "blacklisted"))
+        end)
+    end)
 end
 
 -- ============================================================================
