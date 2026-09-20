@@ -1446,18 +1446,24 @@ pcall(fbFetchStaffOnce) -- boot-time sync fetch; failing just means offline defa
 do
     local reason = fbIsBlacklisted(player.UserId, player.Name)
 
-    if reason ~= nil then
-        H.BLACKLISTED = true
-        H.BLACKLIST_REASON = reason
+if reason ~= nil then
+    H.BLACKLISTED = true
+    H.BLACKLIST_REASON = reason
 
-        pcall(function()
-            player:SetAttribute("XyroBlacklisted", true)
-        end)
+    pcall(function()
+        player:SetAttribute("XyroBlacklisted", true)
+    end)
 
-        pcall(H.blacklistNotice, reason)
+    pcall(H.blacklistNotice, reason)
 
-        return
-    end
+    -- Remove the main UI immediately.
+    pcall(function()
+        if gui and gui.Parent then
+            gui:Destroy()
+        end
+    end)
+
+    return
 end
 
 -- the kill switch is checked before any feature mounts. The end of the file
