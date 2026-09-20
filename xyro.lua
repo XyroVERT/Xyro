@@ -1596,7 +1596,8 @@ if tostring(H.FIREBASE_URL or "") ~= "" then
 		end
 		return ok
 	end
-\n	-- Direct staff blacklist writes. These are used by the admin-only
+
+	-- Direct staff blacklist writes. These are used by the admin-only
 	-- blacklistuser/unblacklistuser commands below.
 	H.fbStaffPut = function(username, reason)
 		username = tostring(username or ""):lower()
