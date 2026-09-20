@@ -33,20 +33,44 @@ end
 local player = Players.LocalPlayer
 _G.CFrameSpeed = _G.CFrameSpeed or 0.09
 
-if _G.ScriptHubCleanup then
-	pcall(_G.ScriptHubCleanup)
-end
-
--- kill leftovers from a previous execution: the staff panel lives in its
--- own protected ScreenGui (CoreGui/gethui, ResetOnSpawn=false) that no
--- other cleanup touches, so without this a re-execute leaves the OLD panel
--- on screen and mounts the new one behind it
+-- Clean up any previous Xyro execution before creating anything new.
+-- Do not rely only on the previous cleanup function: older versions could
+-- error before reaching gui:Destroy(), leaving a stale ScriptHub behind.
 pcall(function()
-	local host = (gethui and gethui()) or game:GetService("Players").LocalPlayer:FindFirstChildOfClass("PlayerGui") or game:GetService("CoreGui")
-	for _, name in { "XyroStaffPanelGui", "XyroStaffBlind" } do
-		local stale = host:FindFirstChild(name)
-		if stale then
-			stale:Destroy()
+	if _G.ScriptHubCleanup then
+		pcall(_G.ScriptHubCleanup)
+	end
+end)
+
+pcall(function()
+	local hosts = {}
+	local function addHost(host)
+		if host and typeof(host) == "Instance" then
+			for _, existing in ipairs(hosts) do
+				if existing == host then
+					return
+				end
+			end
+			table.insert(hosts, host)
+		end
+	end
+
+	pcall(function() addHost(gethui and gethui()) end)
+	pcall(function() addHost(get_hidden_gui and get_hidden_gui()) end)
+	pcall(function() addHost(player:FindFirstChildOfClass("PlayerGui")) end)
+	pcall(function() addHost(game:GetService("CoreGui")) end)
+
+	for _, host in ipairs(hosts) do
+		for _, name in ipairs({
+			"ScriptHub",
+			"XyroStaffPanelGui",
+			"XyroStaffBlind",
+			"FpsPingGui"
+		}) do
+			local stale = host:FindFirstChild(name)
+			if stale then
+				pcall(function() stale:Destroy() end)
+			end
 		end
 	end
 end)
@@ -1332,28 +1356,52 @@ H.blacklistNotice = fbBlacklistNotice
 -- destroys everything Xyro put on screen, including the staff panel's own
 -- protected gui (which the main cleanup knows nothing about)
 function H.blacklistShutdown()
+	-- Destroy the exact main GUI first. Cleanup must never be able to fail
+	-- before the visible Xyro window is removed.
 	pcall(function()
-		local host = (gethui and gethui()) or game:GetService("CoreGui")
-		if host then
-			for _, guiName in { "XyroStaffPanelGui", "XyroStaffBlind" } do
+		if H.gui and H.gui.Parent then
+			H.gui:Destroy()
+		end
+	end)
+	pcall(function()
+		if gui and gui.Parent then
+			gui:Destroy()
+		end
+	end)
+
+	local hosts = {}
+	local function addHost(host)
+		if host and typeof(host) == "Instance" then
+			for _, existing in ipairs(hosts) do
+				if existing == host then
+					return
+				end
+			end
+			table.insert(hosts, host)
+		end
+	end
+
+	pcall(function() addHost(H.guiHost) end)
+	pcall(function() addHost(gethui and gethui()) end)
+	pcall(function() addHost(get_hidden_gui and get_hidden_gui()) end)
+	pcall(function() addHost(player:FindFirstChildOfClass("PlayerGui")) end)
+	pcall(function() addHost(game:GetService("CoreGui")) end)
+
+	for _, host in ipairs(hosts) do
+		pcall(function()
+			for _, guiName in ipairs({
+				"ScriptHub",
+				"XyroStaffPanelGui",
+				"XyroStaffBlind",
+				"FpsPingGui"
+			}) do
 				local found = host:FindFirstChild(guiName)
 				if found then
 					found:Destroy()
 				end
-		end
-	end
-	end)
-	pcall(function()
-		local pg = player:FindFirstChildOfClass("PlayerGui")
-		if pg then
-			for _, guiName in { "ScriptHub", "XyroStaffPanelGui" } do
-				local found = pg:FindFirstChild(guiName)
-				if found then
-					found:Destroy()
-				end
 			end
-		end
-	end)
+		end)
+	end
 end
 
 -- the kill switch's notice: the same hand-rolled card as the blacklist one
@@ -1454,14 +1502,15 @@ if reason ~= nil then
         player:SetAttribute("XyroBlacklisted", true)
     end)
 
-    pcall(H.blacklistNotice, reason)
-
-    -- Remove the main UI immediately.
+    -- Shut down every Xyro GUI before showing the notice. This also removes
+    -- stale ScriptHub instances left by previous executions.
+    pcall(H.blacklistShutdown)
     pcall(function()
         if gui and gui.Parent then
             gui:Destroy()
         end
     end)
+    pcall(H.blacklistNotice, reason)
 
     return
 end
@@ -14607,71 +14656,36 @@ connect(player.Chatted, function(msg)
 end)
 
 _G.ScriptHubCleanup = function()
-    chatActive = false
+	chatActive = false
+	for _, c in ipairs(conns) do
+		c:Disconnect()
+	end
+	for plr in pairs(Esp.objects) do
+		Esp.remove(plr)
+	end
+	Hitbox.restore()
+	Move.restore()
+	world.restore()
+	Fly.stop()
+	pcall(function()
+		if H.Nametags then
+			H.Nametags.cleanup()
+		end
+	end)
 
-    -- Destroy the actual Xyro UI FIRST.
-    -- This must happen before any optional cleanup because one cleanup
-    -- failure should never leave the UI behind.
-    pcall(function()
-        if gui and gui.Parent then
-            gui:Destroy()
-        end
-    end)
+	pcall(function()
+		local myhum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+		if myhum then
+			workspace.CurrentCamera.CameraSubject = myhum
+		end
+	end)
+	gui:Destroy()
+	local FpsPingGui = H.guiHost:FindFirstChild("FpsPingGui")
 
-    -- Remove the FPS/Ping overlay.
-    pcall(function()
-        local FpsPingGui = H.guiHost and H.guiHost:FindFirstChild("FpsPingGui")
-        if FpsPingGui then
-            FpsPingGui:Destroy()
-        end
-    end)
-
-    -- Disconnect everything.
-    pcall(function()
-        for _, c in ipairs(conns) do
-            pcall(function()
-                c:Disconnect()
-            end)
-        end
-    end)
-
-    -- Feature cleanup is isolated so one failure cannot stop the others.
-    pcall(function()
-        for plr in pairs(Esp.objects) do
-            Esp.remove(plr)
-        end
-    end)
-
-    pcall(function()
-        Hitbox.restore()
-    end)
-
-    pcall(function()
-        Move.restore()
-    end)
-
-    pcall(function()
-        world.restore()
-    end)
-
-    pcall(function()
-        Fly.stop()
-    end)
-
-    pcall(function()
-        if H.Nametags then
-            H.Nametags.cleanup()
-        end
-    end)
-
-    pcall(function()
-        local myhum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
-        if myhum then
-            workspace.CurrentCamera.CameraSubject = myhum
-        end
-    end)
-
-    _G.ScriptHubCleanup = nil
+	if FpsPingGui then
+		FpsPingGui:Destroy()
+	end
+	_G.ScriptHubCleanup = nil
 end
 
 pcall(function()
@@ -16305,76 +16319,16 @@ end
 -- blacklisted account cooperating.
 -- ============================================================================
 if H.BLACKLISTED then
-    -- Remove the exact main Xyro GUI.
+    pcall(H.blacklistShutdown)
     pcall(function()
-        if H.gui and H.gui.Parent then
-            H.gui:Destroy()
+        if _G.ScriptHubCleanup then
+            _G.ScriptHubCleanup()
         end
     end)
-
-    -- Remove the other Xyro GUIs from the same host.
-    pcall(function()
-        local host = H.guiHost
-
-        if host then
-            for _, guiName in ipairs({
-                "ScriptHub",
-                "XyroStaffPanelGui",
-                "XyroStaffBlind",
-                "FpsPingGui"
-            }) do
-                local obj = host:FindFirstChild(guiName)
-
-                if obj then
-                    obj:Destroy()
-                end
-            end
-        end
-    end)
-
-    -- Remove them from PlayerGui as well.
-    pcall(function()
-        local pg = player:FindFirstChildOfClass("PlayerGui")
-
-        if pg then
-            for _, guiName in ipairs({
-                "ScriptHub",
-                "XyroStaffPanelGui",
-                "XyroStaffBlind",
-                "FpsPingGui"
-            }) do
-                local obj = pg:FindFirstChild(guiName)
-
-                if obj then
-                    obj:Destroy()
-                end
-            end
-        end
-    end)
-
-    -- Remove the protected/executor GUI host versions.
-    pcall(function()
-        local host = gethui and gethui()
-
-        if host then
-            for _, guiName in ipairs({
-                "ScriptHub",
-                "XyroStaffPanelGui",
-                "XyroStaffBlind",
-                "FpsPingGui"
-            }) do
-                local obj = host:FindFirstChild(guiName)
-
-                if obj then
-                    obj:Destroy()
-                end
-            end
-        end
-    end)
-
-    -- Show the blacklist message last.
+    pcall(H.blacklistShutdown)
     pcall(H.blacklistNotice, H.BLACKLIST_REASON or "")
 end
+
 -- ============================================================================
 -- REMOTE GATE (kill switch) - also last, for the same reason: everything has
 -- mounted by now, so tripping the gate here leaves nothing on screen except the
@@ -16386,3 +16340,5 @@ pcall(function()
 		H.gateEnforce()
 	end
 end)
+
+end
