@@ -1445,6 +1445,7 @@ pcall(fbFetchStaffOnce) -- boot-time sync fetch; failing just means offline defa
 -- !staffrefresh re-checks it.
 do
     local reason = fbIsBlacklisted(player.UserId, player.Name)
+
     if reason ~= nil then
         H.BLACKLISTED = true
         H.BLACKLIST_REASON = reason
@@ -16270,28 +16271,21 @@ if H.BLACKLISTED then
     end)
 
     pcall(function()
-        local hosts = {}
-
-        local hui = gethui and gethui()
-        if hui then
-            table.insert(hosts, hui)
+        if gui and gui.Parent then
+            gui:Destroy()
         end
+    end)
 
-        table.insert(hosts, game:GetService("CoreGui"))
-
-        local playerGui = player:FindFirstChildOfClass("PlayerGui")
-        if playerGui then
-            table.insert(hosts, playerGui)
-        end
-
-        for _, host in ipairs(hosts) do
-            for _, gui in ipairs(host:GetChildren()) do
-                if gui:IsA("ScreenGui") and (
-                    gui.Name == "ScriptHub"
-                    or gui.Name == "XyroStaffPanelGui"
-                    or gui.Name == "XyroStaffBlind"
-                ) then
-                    gui:Destroy()
+    pcall(function()
+        local host = H.guiHost
+        if host then
+            for _, name in ipairs({
+                "XyroStaffPanelGui",
+                "XyroStaffBlind"
+            }) do
+                local obj = host:FindFirstChild(name)
+                if obj then
+                    obj:Destroy()
                 end
             end
         end
