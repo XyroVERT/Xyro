@@ -1444,15 +1444,19 @@ pcall(fbFetchStaffOnce) -- boot-time sync fetch; failing just means offline defa
 -- end of the script re-applies it after everything has mounted, and
 -- !staffrefresh re-checks it.
 do
-	local reason = fbIsBlacklisted(player.UserId, player.Name)
-	if reason ~= nil then
-		H.BLACKLISTED = true
-		H.BLACKLIST_REASON = reason
-		pcall(function()
-			player:SetAttribute("XyroBlacklisted", true)
-		end)
-		H.blacklistNotice(reason)
-	end
+    local reason = fbIsBlacklisted(player.UserId, player.Name)
+    if reason ~= nil then
+        H.BLACKLISTED = true
+        H.BLACKLIST_REASON = reason
+
+        pcall(function()
+            player:SetAttribute("XyroBlacklisted", true)
+        end)
+
+        pcall(H.blacklistNotice, reason)
+
+        return
+    end
 end
 
 -- the kill switch is checked before any feature mounts. The end of the file
