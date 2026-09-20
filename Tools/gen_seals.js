@@ -26,7 +26,71 @@ const SEALS = {
 	seal_trial: [0x46, 0xcd, 0xc8], // teal
 	seal_purple: [0xb0, 0x66, 0xff], // custom purple
 	seal_partner: [0x24, 0x52, 0xdc], // custom dark blue (partners)
+	seal_developer: [0xe6, 0x3e, 0x3e], // red
+	// contrast fallbacks: the editor used to CSS-filter a hole PNG, which also
+	// flattened the check disc drawn as the image's background. These files are
+	// already black/white discs with the opposite check painted in.
+	seal_ink_black: [0x00, 0x00, 0x00],
+	seal_ink_white: [0xff, 0xff, 0xff],
 };
+
+const CHECK_MIN_CONTRAST = 2; // NT_CHECK_MIN_CONTRAST in xyro.lua
+function relLumChannel(v) {
+	v /= 255;
+	return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+}
+function relLum(r, g, b) {
+	return 0.2126 * relLumChannel(r) + 0.7152 * relLumChannel(g) + 0.0722 * relLumChannel(b);
+}
+function checkInkRGB(r, g, b) {
+	const lum = relLum(r, g, b);
+	const ratioWhite = (Math.max(lum, 1) + 0.05) / (Math.min(lum, 1) + 0.05);
+	return ratioWhite >= CHECK_MIN_CONTRAST ? [255, 255, 255] : [0, 0, 0];
+}
+
+/** The source artwork punches the check out. Paint it back in so the mark is
+ *  in the file: Roblox ImageLabels do not composite sibling Frames through PNG
+ *  alpha, and a CSS filter on an <img> also filters its background - both made
+ *  a white (or contrast-flipped) badge look like a solid disc with no check. */
+function fillCheck(rgba, w, h, cr, cg, cb) {
+	const n = w * h;
+	const outside = new Uint8Array(n);
+	const stack = [];
+	const push = (x, y) => {
+		if (x < 0 || y < 0 || x >= w || y >= h) return;
+		const i = y * w + x;
+		if (outside[i]) return;
+		if (rgba[i * 4 + 3] >= 128) return;
+		outside[i] = 1;
+		stack.push(i);
+	};
+	for (let x = 0; x < w; x++) {
+		push(x, 0);
+		push(x, h - 1);
+	}
+	for (let y = 0; y < h; y++) {
+		push(0, y);
+		push(w - 1, y);
+	}
+	while (stack.length) {
+		const i = stack.pop();
+		const x = i % w;
+		const y = (i / w) | 0;
+		push(x + 1, y);
+		push(x - 1, y);
+		push(x, y + 1);
+		push(x, y - 1);
+	}
+	for (let i = 0; i < n; i++) {
+		if (outside[i]) continue;
+		const o = i * 4;
+		const a = rgba[o + 3] / 255;
+		rgba[o] = Math.round(rgba[o] * a + cr * (1 - a));
+		rgba[o + 1] = Math.round(rgba[o + 1] * a + cg * (1 - a));
+		rgba[o + 2] = Math.round(rgba[o + 2] * a + cb * (1 - a));
+		rgba[o + 3] = 255;
+	}
+}
 
 const SIG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
@@ -167,7 +231,13 @@ for (const [name, [r, g, b]] of Object.entries(SEALS)) {
 			out[i * 4 + 2] = b;
 		}
 	}
+	const [cr, cg, cb] = checkInkRGB(r, g, b);
+	fillCheck(out, img.w, img.h, cr, cg, cb);
 	const dst = path.join(OUT_DIR, name + ".png");
 	fs.writeFileSync(dst, encode(img.w, img.h, out));
-	console.log("wrote media/" + name + ".png (" + img.w + "x" + img.h + ", #" + [r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("") + ")");
+	console.log(
+		"wrote media/" + name + ".png (" + img.w + "x" + img.h + ", #" +
+			[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("") +
+			" check #" + [cr, cg, cb].map((v) => v.toString(16).padStart(2, "0")).join("") + ")"
+	);
 }

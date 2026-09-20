@@ -1309,7 +1309,11 @@ async function mirrorToRepo(env, bodyText) {
 async function cached(env, ctx, url, ttl, contentType, produce) {
 	const fresh = url.searchParams.has("fresh");
 	const canCache = typeof caches !== "undefined" && caches.default && !fresh;
-	const cacheKey = new Request(url.origin + url.pathname);
+	const cacheKey = new Request(url.origin + url.pathname + (url.searchParams.get("v") ? "?v=" + encodeURIComponent(url.searchParams.get("v")) : ""));
+	/* pathname plus the client's ?v= buster, nothing else. `key=` must not
+	   fragment the cache; a bumped sealBuster (?v=16) MUST, or the Worker
+	   keeps serving the previous artwork for the whole TTL and the game
+	   looks like the badge never updated. */
 	if (canCache) {
 		const hit = await caches.default.match(cacheKey);
 		/* Never serve an empty cached body. A cache entry is written from

@@ -9115,13 +9115,13 @@ local NT_SEAL_INK_LIGHT = Color3.new(1, 1, 1)
 -- channel(1) = 1), so no rounding creeps in between the two sides
 local NT_SEAL_INK_DARK_LUM = 0
 local NT_SEAL_INK_LIGHT_LUM = 1
--- THE CHECK IS A HOLE. The seal artwork is a disc with the check CUT OUT of it
--- (45% of the file is transparent), so the check has always been whatever is
--- behind the badge: the pill colour on a flat pill, and the background PICTURE
--- on a rule with a bgImage - which is how a flat black badge ends up looking
--- like a black blob with a smudge in it. A disc of the contrasting ink drawn
--- BEHIND the seal fills that hole, so the check is drawn rather than borrowed
--- and the badge reads the same whatever it is over.
+-- THE CHECK USED TO BE A HOLE. The source mask punches the check out, and a
+-- disc of contrasting ink was drawn BEHIND the ImageLabel to fill it. That
+-- does not work in Roblox: ImageLabels do not composite sibling Frames through
+-- PNG alpha, so the hole showed white (ImageColor3) or the pill, and a white
+-- HR seal looked like a solid disc with no check. The PNGs and the local mask
+-- build now PAINT the check in. The disc behind is kept for old cached hole
+-- files that have not been re-downloaded yet.
 --
 -- The size is measured off the artwork, not guessed: the check reaches 9.92px
 -- from the disc's centre and a circle up to 12.50px of radius stays inside the
@@ -10181,6 +10181,67 @@ local NT_SEAL_MASK = {
 	"0000000000111111110000000000",
 	"0000000000000000000000000000",
 }
+-- Paint the punched-out check into a seal pixel buffer so the mark is in the
+-- file. Exterior transparency (around the scallops) is preserved; interior
+-- transparent pixels become the check, composited behind antialiased disc edges.
+local function ntFillSealCheck(px, w, h, checkColor)
+	local n = w * h
+	local cr = math.floor(checkColor.R * 255 + 0.5)
+	local cg = math.floor(checkColor.G * 255 + 0.5)
+	local cb = math.floor(checkColor.B * 255 + 0.5)
+	local outside = table.create(n, false)
+	local stack = table.create(w * 2 + h * 2, 0)
+	local top = 0
+	local function push(x, y)
+		if x < 1 or y < 1 or x > w or y > h then
+			return
+		end
+		local i = (y - 1) * w + x
+		if outside[i] then
+			return
+		end
+		local pix = px[i]
+		local a = pix and pix:byte(4) or 0
+		if a >= 128 then
+			return
+		end
+		outside[i] = true
+		top += 1
+		stack[top] = i
+	end
+	for x = 1, w do
+		push(x, 1)
+		push(x, h)
+	end
+	for y = 1, h do
+		push(1, y)
+		push(w, y)
+	end
+	while top > 0 do
+		local i = stack[top]
+		top -= 1
+		local x = ((i - 1) % w) + 1
+		local y = math.floor((i - 1) / w) + 1
+		push(x + 1, y)
+		push(x - 1, y)
+		push(x, y + 1)
+		push(x, y - 1)
+	end
+	for i = 1, n do
+		if not outside[i] then
+			local pix = px[i] or "\0\0\0\0"
+			local r, g, b, a = pix:byte(1, 4)
+			a = (a or 0) / 255
+			px[i] = string.char(
+				math.floor((r or 0) * a + cr * (1 - a) + 0.5),
+				math.floor((g or 0) * a + cg * (1 - a) + 0.5),
+				math.floor((b or 0) * a + cb * (1 - a) + 0.5),
+				255
+			)
+		end
+	end
+end
+
 local NT_SEAL_TINTS = {} -- [rank or ink key] = asset uri (false = build failed)
 -- pre-tinted seals. The in-engine tint stays as backup; on executors where
 -- getcustomasset refuses rewritten files the fallback keeps the real
@@ -10199,7 +10260,8 @@ local function ntSealAsset(rank, ink)
 	-- ink (optional): build the mask in a flat colour instead of the rank tint,
 	-- which is how a badge that would blend into the pill gets its black/white
 	-- version (ntSealInk). Cached under its own key, so a rankless badge can have
-	-- one too. The mask's check is a cut-out, so the pill shows through it.
+	-- one too. The check is painted into the file (ntFillSealCheck), so it does
+	-- not depend on whatever sits behind the ImageLabel.
 	local key = rank
 	if ink then
 		key = string.format("ink_%d_%d_%d",
@@ -10238,6 +10300,7 @@ local function ntSealAsset(rank, ink)
 				end
 			end
 		end
+		ntFillSealCheck(px, w, h, ntCheckInk(ntLuminance(tint)))
 		local png = ntEncodePNG(w, h, table.concat(px))
 		if type(png) ~= "string" or #png < 24 then
 			return nil
@@ -10852,7 +10915,7 @@ local function ntBuild(plr, rule)
 		-- ever fetched while its file did not exist yet leaves a poisoned disk
 		-- entry; a new buster gives every seal a fresh stem, so the red developer
 		-- seal (added after ?v=14) stops inheriting that history.
-		local sealBuster = "?v=15"
+		local sealBuster = "?v=16"
 		-- CONTRAST FIRST. The seal is drawn ON the backdrop the pill shows, so a
 		-- rank tint that sits close to that backdrop's lightness vanishes into it -
 		-- the white HR seal on a white pill, the navy partner seal on a black one.
@@ -10928,9 +10991,10 @@ local function ntBuild(plr, rule)
 				end
 			end)
 		elseif sealInk then
-			-- no getcustomasset/writefile to build one with: the glyph in that ink
-			badgeGlyphFallback()
-			b.TextColor3 = sealInk
+			-- local build unavailable: the pre-baked black/white seals (check
+			-- already painted in) from the API, then the glyph
+			local inkFile = ntLuminance(sealInk) < 0.5 and "seal_ink_black.png" or "seal_ink_white.png"
+			sealUrl = ntMediaUrl(inkFile, sealBuster)
 		elseif badgeRank and badgeTint then
 			-- RANK TINT: the pre-tinted PNG first - the same network pipeline
 			-- that renders the blue seal everywhere - so in-game colors always
@@ -10958,8 +11022,8 @@ local function ntBuild(plr, rule)
 		-- badges only), then give up to the glyph. Runs on the tag's own
 		-- closure; every step re-checks parenting so re-ghosted tags are safe.
 		task.delay(6, function()
-			if sealInk then
-				return -- the contrast build has no download to verify (own delay above)
+			if inkSeal then
+				return -- the local contrast build has its own delay above
 			end
 			if not (img.Parent and b.Parent) then
 				return
