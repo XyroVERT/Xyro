@@ -201,27 +201,52 @@ function sealGeometry(img) {
 	return { reach, safe, side: img.h, holes: hole.length };
 }
 
+/* ------------- the check: punched out of the SOURCE, painted into copies */
+
+/* media/verified_seal.png is the mask: the check is a transparent hole. That
+   hole's geometry still pins NT_SEAL_CHECK_DISC (the in-game disc behind old
+   cached files). Generated seals PAINT the check in, because a hole does not
+   show a sibling Frame through a Roblox ImageLabel - white badges had no check. */
 const luaDisc = parseFloat((lua.match(/local NT_SEAL_CHECK_DISC = ([\d.]+)/) || [])[1]);
 const htmlDisc = parseFloat((html.match(/checkDisc: ([\d.]+)/) || [])[1]);
 ok("the script states how much of the badge the check's disc covers", isFinite(luaDisc), String(luaDisc));
 ok("...and the editor hardcodes the same fraction", isFinite(htmlDisc) && htmlDisc === luaDisc, luaDisc + " in xyro.lua vs " + htmlDisc + " in index.html");
 
-const checkFiles = [...new Set([...Object.values(seals), "verified_seal.png", "verified_seal_blue.png"])]
+const sourceSeal = path.join(ROOT, "media", "verified_seal.png");
+ok("the source mask exists", fs.existsSync(sourceSeal), sourceSeal);
+const sourceGeom = sealGeometry(decode(sourceSeal));
+ok("the source artwork still has a cut-out check (the mask)", sourceGeom.holes > 50, String(sourceGeom.holes));
+const sourceRadius = (luaDisc * sourceGeom.side) / 2;
+ok("the disc covers the whole check on the source mask", sourceRadius - sourceGeom.reach >= 0,
+	"leaves " + (sourceRadius - sourceGeom.reach).toFixed(2) + "px of the check uncovered");
+ok("...and never reaches the transparent edge around the badge", sourceRadius - sourceGeom.safe <= 0,
+	"the disc would show by " + (sourceRadius - sourceGeom.safe).toFixed(2) + "px");
+
+function countRgb(img, r, g, b, t) {
+	let n = 0;
+	for (let i = 0; i < img.pixels.length; i += img.bpp) {
+		const a = img.bpp === 4 ? img.pixels[i + 3] : 255;
+		if (a < 200) continue;
+		if (Math.abs(img.pixels[i] - r) <= t && Math.abs(img.pixels[i + 1] - g) <= t && Math.abs(img.pixels[i + 2] - b) <= t) n++;
+	}
+	return n;
+}
+
+const generatedSeals = [...new Set([...Object.values(seals), "verified_seal_blue.png", "seal_ink_black.png", "seal_ink_white.png"])]
 	.map(f => path.join(ROOT, "media", f))
 	.filter(f => fs.existsSync(f));
-let worstCover = Infinity, worstInside = -Infinity, geometrySeen = new Set();
-for (const file of checkFiles) {
-	const g = sealGeometry(decode(file));
-	const radius = (luaDisc * g.side) / 2;
-	worstCover = Math.min(worstCover, radius - g.reach);
-	worstInside = Math.max(worstInside, radius - g.safe);
-	geometrySeen.add(g.reach.toFixed(2) + "/" + g.safe.toFixed(2) + "/" + g.holes);
+ok("contrast fallback seals exist", fs.existsSync(path.join(ROOT, "media", "seal_ink_black.png")) && fs.existsSync(path.join(ROOT, "media", "seal_ink_white.png")), "");
+for (const file of generatedSeals) {
+	const img = decode(file);
+	const g = sealGeometry(img);
+	ok(path.basename(file) + " has the check painted in, not cut out", g.holes === 0, g.holes + " hole pixels");
 }
-ok("every seal shares one check geometry", geometrySeen.size === 1, [...geometrySeen].join(" | "));
-ok("the disc covers the whole check on every seal", worstCover >= 0,
-	"tightest seal leaves " + worstCover.toFixed(2) + "px of the check uncovered");
-ok("...and never reaches the transparent edge around the badge", worstInside <= 0,
-	"the disc would show by " + worstInside.toFixed(2) + "px on the worst seal");
+const blueFile = decode(path.join(ROOT, "media", "verified_seal_blue.png"));
+ok("the blue seal's check is opaque white, not a hole", countRgb(blueFile, 255, 255, 255, 20) >= 50,
+	"white check pixels=" + countRgb(blueFile, 255, 255, 255, 20));
+const hrFile = decode(path.join(ROOT, "media", "seal_hr.png"));
+ok("the white HR seal's check is opaque black, so it reads on a white disc", countRgb(hrFile, 0, 0, 0, 40) >= 50,
+	"black check pixels=" + countRgb(hrFile, 0, 0, 0, 40));
 
 // the plain check everyone without a rank gets
 const blue = dominantTint(decode(path.join(ROOT, "media", "verified_seal_blue.png")));
@@ -318,7 +343,7 @@ function looksWhole(data) {
 /* the full buster line, parsed once: the version is part of the contract now */
 const busterVersion = Number(((lua.match(/local sealBuster = "\?v=(\d+)"/) || [])[1]) || 0);
 ok("...and the buster is recent enough to abandon a poisoned entry written before the red tier existed",
-	busterVersion >= 15, "sealBuster v" + busterVersion);
+	busterVersion >= 16, "sealBuster v" + busterVersion);
 
 for (const rank of ranks) {
 	const file = path.join(ROOT, "media", seals[rank]);

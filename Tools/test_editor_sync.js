@@ -601,11 +601,13 @@ const settle = (ms = 12) => new Promise(r => setTimeout(r, ms));
 	el("fBgHex").value = "#FFFFFF";
 	hosted.renderEditorPreview();
 	ok("the mini preview draws the badge black on a white pill",
-		el("edBadgeCheck").style.filter === "brightness(0)", JSON.stringify(el("edBadgeCheck").style.filter));
+		/seal_ink_black\.png/.test(el("edBadgeCheck").src) && el("edBadgeCheck").style.filter === "",
+		el("edBadgeCheck").src + " filter=" + JSON.stringify(el("edBadgeCheck").style.filter));
 	el("fBgHex").value = "#000000";
 	hosted.renderEditorPreview();
 	ok("...and leaves it untouched on a black pill",
-		el("edBadgeCheck").style.filter === "", JSON.stringify(el("edBadgeCheck").style.filter));
+		/seal_founder\.png/.test(el("edBadgeCheck").src) && el("edBadgeCheck").style.filter === "",
+		el("edBadgeCheck").src + " filter=" + JSON.stringify(el("edBadgeCheck").style.filter));
 	el("fBgHex").value = "";
 	hosted.closeEditor();
 
@@ -718,14 +720,14 @@ const settle = (ms = 12) => new Promise(r => setTimeout(r, ms));
 	await hosted.bgLum(urlOf(WHITE_BG));
 	hosted.renderEditorPreview();
 	ok("the preview draws the badge black on a white background picture",
-		el("edBadgeCheck").style.filter === "brightness(0)" && /background picture/.test(el("edBadgeCheck").title),
-		JSON.stringify(el("edBadgeCheck").style.filter) + " / " + el("edBadgeCheck").title);
+		/seal_ink_black\.png/.test(el("edBadgeCheck").src) && /background picture/.test(el("edBadgeCheck").title),
+		el("edBadgeCheck").src + " / " + el("edBadgeCheck").title);
 	el("fBgImage").value = urlOf(BLACK_BG);
 	el("fRank").value = "partner"; // navy on black: the other direction
 	await hosted.bgLum(urlOf(BLACK_BG));
 	hosted.renderEditorPreview();
 	ok("...and white on a black one",
-		el("edBadgeCheck").style.filter === "brightness(0) invert(1)", JSON.stringify(el("edBadgeCheck").style.filter));
+		/seal_ink_white\.png/.test(el("edBadgeCheck").src), el("edBadgeCheck").src);
 	/* the same two rules judged by the pill colour would be the wrong way round:
 	   the pill is white by default, so the navy seal is left alone there */
 	el("fBgImage").value = "";
@@ -733,7 +735,7 @@ const settle = (ms = 12) => new Promise(r => setTimeout(r, ms));
 	el("fBgHex").value = "#FFFFFF";
 	hosted.renderEditorPreview();
 	ok("a flat pill still uses the pill colour",
-		el("edBadgeCheck").style.filter === "brightness(0)", JSON.stringify(el("edBadgeCheck").style.filter));
+		/seal_ink_black\.png/.test(el("edBadgeCheck").src), el("edBadgeCheck").src);
 	el("fBgHex").value = "";
 	hosted.closeEditor();
 
@@ -801,37 +803,33 @@ const settle = (ms = 12) => new Promise(r => setTimeout(r, ms));
 		taller.x0 === band.fx0 && taller.x1 === band.fx1 && taller.y0 > band.fy0,
 		JSON.stringify(taller));
 
-	/* --- 5e. the check is DRAWN, not a hole ------------------------------ */
+	/* --- 5e. the check is IN the file, not a CSS hole-fill ---------------- */
 
-	/* The artwork's check is transparent, so it shows whatever the badge is over -
-	   the pill colour on a flat pill and the PHOTO on a rule with a bgImage. Both
-	   sides draw a disc of the contrasting ink behind the seal to fill it, and that
-	   disc's size is pinned to the artwork's own geometry by test_seals.js. */
-	/* white first, not "whichever contrasts more": the mark is a WHITE check on a
-	   dark disc, and black only when the disc is too light for white to read */
+	/* CSS filter on the <img> also flattened the check (it used to live as the
+	   image's background gradient). Contrast now swaps in a dedicated PNG with
+	   the check already painted. */
 	ok("the check's ink is white on a dark disc, black only on a light one",
 		api.checkInkOf(api.relLuminance("#2452dc")) === "#ffffff" && api.checkInkOf(api.relLuminance("#00a2ff")) === "#ffffff"
 			&& api.checkInkOf(api.relLuminance("#d2d6de")) === "#000000" && api.checkInkOf(api.relLuminance("#ffffff")) === "#000000",
 		[api.checkInkOf(api.relLuminance("#2452dc")), api.checkInkOf(api.relLuminance("#00a2ff")),
 			api.checkInkOf(api.relLuminance("#d2d6de")), api.checkInkOf(api.relLuminance("#ffffff"))].join("/"));
-	const discCss = () => String(el("edBadgeCheck").style.background || "");
-	/* rule 0 has a background picture measured bright, so its silver seal is
-	   drawn flat black - and a BLACK check on a black disc is nothing, which is
-	   exactly the case this disc exists for */
 	hosted.openEditor(0);
+	el("fBgImage").value = urlOf(WHITE_BG);
+	await hosted.bgLum(urlOf(WHITE_BG));
 	hosted.renderEditorPreview();
-	ok("the preview draws that disc behind the seal",
-		/radial-gradient/.test(discCss()) && discCss().includes("#ffffff"), discCss());
-	ok("...sized to the artwork's geometry, not to taste",
-		discCss().includes((hosted.PILL_LAYOUT.checkDisc * 100).toFixed(0) + "%"), discCss());
-	/* the same silver seal on a plain dark pill is NOT flipped: a silver disc, so
-	   the check has to come out black */
+	ok("a blending badge uses the pre-baked black seal, not a CSS filter",
+		/seal_ink_black\.png/.test(el("edBadgeCheck").src) && el("edBadgeCheck").style.filter === "",
+		el("edBadgeCheck").src + " filter=" + JSON.stringify(el("edBadgeCheck").style.filter));
+	ok("...and does not fake the check with a background gradient",
+		!/radial-gradient/.test(String(el("edBadgeCheck").style.background || "")),
+		String(el("edBadgeCheck").style.background || ""));
+	/* the same silver seal on a plain dark pill is NOT flipped: founder PNG */
 	el("fBgImage").value = "";
 	el("fBgHex").value = "#0C0C10";
 	el("fRank").value = "founder";
 	hosted.renderEditorPreview();
-	ok("...in the ink that disc needs, not one fixed colour",
-		discCss().includes("#000000") && !discCss().includes("#ffffff"), discCss());
+	ok("...and a seal that already reads keeps its tinted file",
+		/seal_founder\.png/.test(el("edBadgeCheck").src), el("edBadgeCheck").src);
 	el("fBgHex").value = "";
 	el("fRank").value = "";
 	hosted.closeEditor();

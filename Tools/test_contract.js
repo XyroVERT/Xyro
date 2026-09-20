@@ -216,7 +216,7 @@ ok("a download is refused unless it is a whole image",
 ok("...with a floor, so an empty or one-byte body cannot pass",
 	/local NT_IMAGE_MIN = 24/.test(lua) && /#data < NT_IMAGE_MIN/.test(lua), "");
 const buster = Number(((lua.match(/local sealBuster = "\?v=(\d+)"/) || [])[1]) || 0);
-ok("the seal buster is bumped past every seal that has been added", buster >= 15, "v" + buster);
+ok("the seal buster is bumped past every seal that has been added", buster >= 16, "v" + buster);
 ok("...and the comment says that adding a seal is what bumps it",
 	/BUMPED when a seal is ADDED/.test(lua), "");
 
@@ -401,6 +401,8 @@ ok("the script maps repo media onto that same route instead of a CDN",
 ok("no rule in the shipped file carries an inline image",
 	JSON.stringify(file).length < 256 * 1024 && !/data:image\//.test(JSON.stringify(file)),
 	JSON.stringify(file).length + " bytes");
+ok("a bumped seal buster is a new Worker cache entry, not the same pathname for 300s",
+	/searchParams\.get\("v"\)/.test(worker), "Worker cache key must include ?v=");
 
 /* ------------------------------------------------------ the worker-to-worker hop */
 
@@ -755,10 +757,17 @@ ok("a loaded document is measured through, so a live tag's badge is fixed by ope
 	/async function measureRuleBackgrounds\(\)/.test(html) && /measureRuleBackgrounds\(\); \/\/ no await/.test(html));
 ok("...and builds the mask locally in that ink when it would blend",
 	/local inkSeal = sealInk and ntSealAsset\(badgeRank, sealInk\) or nil/.test(badgeBlock));
-ok("...falling back to the glyph in the SAME ink when it cannot build one",
-	/badgeGlyphFallback\(\)\n\s*b\.TextColor3 = sealInk/.test(badgeBlock));
+ok("...falling back to a pre-baked ink PNG when it cannot build one locally",
+	/seal_ink_black\.png/.test(badgeBlock) && /seal_ink_white\.png/.test(badgeBlock));
+ok("...and the glyph still uses that ink if the image also fails",
+	/badgeGlyphFallback\(\)[\s\S]{0,80}b\.TextColor3 = sealInk/.test(badgeBlock));
 ok("the local seal build takes an ink, so a rankless badge can have one too",
 	/local function ntSealAsset\(rank, ink\)/.test(lua) && /local key = rank\n\tif ink then/.test(lua));
+ok("the local mask build paints the check into the file, not as a hole",
+	/local function ntFillSealCheck/.test(lua) && /ntFillSealCheck\(px, w, h, ntCheckInk/.test(lua));
+ok("the editor picks those same ink files instead of CSS-filtering a hole",
+	/function sealFileFor\(rank, ink\)/.test(html) && /seal_ink_black\.png/.test(html) && /seal_ink_white\.png/.test(html)
+		&& !/brightness\(0\) invert\(1\)/.test(html));
 /* THE CHECK IS A HOLE. The artwork is a disc with the check cut out, so the check
    is whatever sits behind the badge - fine on a flat pill, and a photo-coloured
    smudge the moment the seal is drawn flat over a bgImage. A disc of contrasting
