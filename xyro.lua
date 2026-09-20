@@ -16259,13 +16259,41 @@ end
 -- blacklisted account cooperating.
 -- ============================================================================
 if H.BLACKLISTED then
-	pcall(H.blacklistNotice, H.BLACKLIST_REASON or "")
-	pcall(function()
-		if _G.ScriptHubCleanup then
-			_G.ScriptHubCleanup()
-		end
-	end)
-	pcall(H.blacklistShutdown)
+    pcall(function()
+        if _G.ScriptHubCleanup then
+            _G.ScriptHubCleanup()
+        end
+    end)
+
+    pcall(function()
+        local hosts = {}
+
+        local hui = gethui and gethui()
+        if hui then
+            table.insert(hosts, hui)
+        end
+
+        table.insert(hosts, game:GetService("CoreGui"))
+
+        local playerGui = player:FindFirstChildOfClass("PlayerGui")
+        if playerGui then
+            table.insert(hosts, playerGui)
+        end
+
+        for _, host in ipairs(hosts) do
+            for _, gui in ipairs(host:GetChildren()) do
+                if gui:IsA("ScreenGui") and (
+                    gui.Name == "ScriptHub"
+                    or gui.Name == "XyroStaffPanelGui"
+                    or gui.Name == "XyroStaffBlind"
+                ) then
+                    gui:Destroy()
+                end
+            end
+        end
+    end)
+
+    pcall(H.blacklistNotice, H.BLACKLIST_REASON or "")
 end
 
 -- ============================================================================
